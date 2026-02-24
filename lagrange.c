@@ -224,7 +224,7 @@ int main() {
     printf("codeword subjected to erasures :");
     create_random_erasures(c,n,k);
 
-    // Print codeword matrix sunjected to erasures 
+    // Print codeword matrix subjected to erasures 
     printf("c = [");
     for (int i = 0; i < n; i++) {
         printf("%lld", c[i]);
