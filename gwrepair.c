@@ -397,7 +397,27 @@ static void print_vec(const Field *F, long long a)
     printf("]");
     free(v);
 }
+static void print_poly(const Field *F, long long a)
+{
+    int *v = malloc(F->m * sizeof(int));
+    to_vec(F, a, v);
 
+    int first = 1;
+    for (int i = 0; i < F->m; i++) {
+        if (v[i] == 0) continue;
+
+        if (!first) printf(" + ");
+        first = 0;
+
+        if (i == 0) printf("1");
+        else if (i == 1) printf("α");
+        else printf("α^%d", i);
+    }
+
+    if (first) printf("0");  // zero element
+
+    free(v);
+}
 
 /* ============================================================================
  *  Guruswami-Wootters Repair
@@ -418,15 +438,7 @@ static long long repair_gw(const Field *F,
      *   s_j[t]  = Tr(t * ratio_j)  for t = 1..q-1
      * Retained for exposition; not used in reconstruction below.
      */
-    int **s = malloc(n * sizeof(int *));
-    for (int j = 0; j < n; j++) {
-        s[j] = calloc(q, sizeof(int));
-        if (j == missing) continue;
-        long long diff  = fsub(F, eval[j], astar);
-        long long ratio = fmul(F, code[j], finv(F, diff));
-        for (int t = 1; t < q; t++)
-            s[j][t] = ftrace(F, fscalar(F, t, ratio));
-    }
+    
 
     /*
      * Reconstruction via the sum-zero identity:
@@ -434,20 +446,61 @@ static long long repair_gw(const Field *F,
      *   f(a*)  =   sum_i  tr[i] * basis[i]
      */
     int *tr = calloc(m, sizeof(int));
-    for (int j = 0; j < n; j++) {
-        if (j == missing) continue;
-        for (int i = 0; i < m; i++) {
-            int contrib = ftrace(F, fmul(F, dual[i], code[j]));
-            tr[i] = (tr[i] - contrib % q + q) % q;
-        }
+    for (int i = 0; i < m; i++) {
+
+    if (verbose) {
+        printf("Tr(u%d f(alpha*)) = - [ ", i);
     }
 
-    long long recon = 0;
-    for (int i = 0; i < m; i++)
-        recon = fadd(F, recon, fscalar(F, tr[i], basis[i]));
+    int sum = 0;
 
-    for (int j = 0; j < n; j++) free(s[j]);
-    free(s);
+    for (int j = 0; j < n; j++) {
+        if (j == missing) continue;
+
+        int contrib = ftrace(F, fmul(F, dual[i], code[j]));
+
+        if (verbose) {
+            printf("Tr(u%d * c%d)=%d ", i, j, contrib);
+            if (j != n - 1) printf("+ ");
+        }
+
+        sum = (sum + contrib) % q;
+    }
+
+    tr[i] = ((-sum) % q + q) % q;
+
+    if (verbose) {
+        printf("] = %d\n", tr[i]);
+    }
+}
+    if (verbose) {
+    printf("Trace values Tr(u_i f(alpha*)):\n");
+    for (int i = 0; i < m; i++) {
+        printf("Tr(u%d f(alpha*)) = %d\n", i, tr[i]);
+    }
+    printf("\n");
+}
+
+    long long recon = 0;
+for (int i = 0; i < m; i++)
+    recon = fadd(F, recon, fscalar(F, tr[i], basis[i]));
+
+if (verbose) {
+    printf("Reconstruction:\n");
+    printf("f(alpha*) = ");
+
+    for (int i = 0; i < m; i++) {
+        printf("%d × ", tr[i]);
+        print_poly(F, basis[i]);
+
+        if (i < m - 1) printf(" + ");
+    }
+
+
+    printf("\n\n");
+}
+
+    
     free(tr);
     return recon;
 }
@@ -519,6 +572,17 @@ int main(int argc, char *argv[])
 
     int       missing  = rand() % n_rs;
     long long true_val = code[missing];
+    int *subsymbol = calloc(n_rs, sizeof(int));
+long long astar = eval[missing];
+
+for (int j = 0; j < n_rs; j++) {
+    if (j == missing) continue;
+
+    long long diff  = fsub(&F, eval[j], astar);
+    long long ratio = fmul(&F, code[j], finv(&F, diff));
+
+    subsymbol[j] = ftrace(&F, ratio);   // s(alpha_j)
+}
 
     /* Print field info */
     printf("\nGF(%d^%d)   n=%d (full field)   k=%d  (random in [1, %d])\n", q_val, m_val, n_rs, k, k_max);
@@ -539,13 +603,19 @@ int main(int argc, char *argv[])
 
     /* Print codeword */
     printf("Full codeword  (c%d is the erased symbol):\n", missing);
-    for (int i = 0; i < n_rs; i++) {
-        if (i == missing) {
-            printf("  c%d = [ERASED]\n", i);
-        } else {
-            printf("  c%d = ", i); print_vec(&F, code[i]); printf("\n");
-        }
+
+for (int i = 0; i < n_rs; i++) {
+    if (i == missing) {
+        printf("  c%d = [ERASED]\n", i);
+    } else {
+        printf("  c%d = ", i);
+        print_vec(&F, code[i]);
+
+        printf("   s(alpha_%d) = %d", i, subsymbol[i]);
+
+        printf("\n");
     }
+}
 
     /* Repair */
     printf("\n--- Repair of c%d   (alpha* = %lld) ---\n\n", missing, eval[missing]);
