@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <assert.h>
 
 
 typedef struct {
@@ -30,9 +31,8 @@ static int is_prime(int n)
     for (int i = 2; (long long)i * i <= n; i++) {
         if (n % i == 0)
             return 0;
-        return 1;
     }
-    return -1;
+    return 1;
 }
 
 /* ============================================================================
@@ -179,7 +179,6 @@ static int ftrace(const Field *F, long long x)
  *  Irreducible Polynomial Utilities
  * ============================================================================ */
 
-/* Returns 1 if polynomial p[0..d] has no roots in GF(q) */
 static int _no_roots(const int *p, int d, int q)
 {
     for (int x = 0; x < q; x++) {
@@ -193,7 +192,6 @@ static int _no_roots(const int *p, int d, int q)
     return 1;
 }
 
-/* Returns 1 if D[0..dd] divides P[0..dp] over GF(q) */
 static int _divides(const int *P, int dp, const int *D, int dd, int q)
 {
     int *r = malloc((dp + 1) * sizeof(int));
@@ -214,7 +212,6 @@ static int _divides(const int *P, int dp, const int *D, int dd, int q)
     return ok;
 }
 
-/* Search for a monic irreducible polynomial of degree m over GF(q) */
 static int find_irr_runtime(int q, int m, int *out)
 {
     long long total = ipow(q, m);
@@ -259,7 +256,6 @@ static int find_irr_runtime(int q, int m, int *out)
     return 0;
 }
 
-/* Load irreducible polynomial into F->irr via runtime search */
 static int load_irr_poly(Field *F)
 {
     return find_irr_runtime(F->q, F->m, F->irr);
@@ -270,7 +266,6 @@ static int load_irr_poly(Field *F)
  *  Basis Construction
  * ============================================================================ */
 
-/* Standard polynomial basis: b[i] = X^i */
 static void make_basis(const Field *F, long long *b)
 {
     long long p = 1;
@@ -280,7 +275,6 @@ static void make_basis(const Field *F, long long *b)
     }
 }
 
-/* Solve  A * x = b  over GF(p) using Gauss-Jordan elimination */
 static void gauss_solve(int n, int **A, int *b, int p, int *x)
 {
     int **M = malloc(n * sizeof(int *));
@@ -300,7 +294,6 @@ static void gauss_solve(int n, int **A, int *b, int p, int *x)
         if (sel < 0) continue;
         if (sel != row) { int *t = M[row]; M[row] = M[sel]; M[sel] = t; }
 
-        /* Compute modular inverse of pivot */
         int piv = M[row][col], inv = 1, base = piv, e = p - 2;
         while (e > 0) {
             if (e & 1) inv  = (int)((long long)inv  * base % p);
@@ -337,7 +330,6 @@ static void gauss_solve(int n, int **A, int *b, int p, int *x)
     free(M);
 }
 
-/* Compute the dual basis w.r.t. the trace bilinear form */
 static void make_dual(const Field *F, const long long *basis, long long *dual)
 {
     int m = F->m, q = F->q;
@@ -368,7 +360,6 @@ static void make_dual(const Field *F, const long long *basis, long long *dual)
  *  Reed-Solomon Encoding
  * ============================================================================ */
 
-/* Evaluate polynomial msg[0..k-1] at each point in eval[0..n-1] (Horner's method) */
 static void rs_encode(const Field *F, const long long *msg, int k,
                       const long long *eval, int n, long long *code)
 {
@@ -397,6 +388,7 @@ static void print_vec(const Field *F, long long a)
     printf("]");
     free(v);
 }
+
 static void print_poly(const Field *F, long long a)
 {
     int *v = malloc(F->m * sizeof(int));
@@ -405,103 +397,200 @@ static void print_poly(const Field *F, long long a)
     int first = 1;
     for (int i = 0; i < F->m; i++) {
         if (v[i] == 0) continue;
-
         if (!first) printf(" + ");
         first = 0;
-
         if (i == 0) printf("1");
         else if (i == 1) printf("α");
         else printf("α^%d", i);
     }
 
-    if (first) printf("0");  // zero element
+    if (first) printf("0");
 
     free(v);
 }
 
 /* ============================================================================
- *  Guruswami-Wootters Repair
+ *  Subsymbol Generation
  * ============================================================================ */
 
-static long long repair_gw(const Field *F,
-                            const long long *basis, const long long *dual,
-                            const long long *eval,  int n,
-                            const long long *code,  int missing, int verbose)
+static int compute_subsymbol(const Field *F, 
+                              long long alpha_j,
+                              long long alpha_star,
+                              long long f_alpha_j)
 {
-    int       m     = F->m;
-    int       q     = F->q;
+    long long diff = fsub(F, alpha_j, alpha_star);
+    long long inv_diff = finv(F, diff);
+    long long ratio = fmul(F, f_alpha_j, inv_diff);
+    
+    int s = ftrace(F, ratio);
+    return s;
+}
+
+
+/* ============================================================================
+ *  FINAL CORRECTED Guruswami-Wootters Repair
+ * ============================================================================ */
+
+/**
+ * repair_gw_subsymbol: Reconstruct missing symbol
+ * 
+ * CORRECTED RECONSTRUCTION:
+ * The key insight: tr[i] values ARE the coefficients!
+ * 
+ * From dual basis orthogonality:
+ *   Tr(u_i · f(α*)) = c_i  (where f(α*) = ∑_i c_i · b_i)
+ * 
+ * So: tr[i] = ∑_j Tr((α_j - α*) · u_i) · s(α_j)  computes Tr(u_i · f(α*))
+ *     which gives us c_i directly!
+ * 
+ * Then: f(α*) = ∑_i c_i · b_i  where c_i = tr[i]
+ */
+static long long repair_gw_subsymbol(const Field *F,
+                                     const long long *basis,
+                                     const long long *dual,
+                                     const long long *eval,
+                                     int n,
+                                     const long long *code,
+                                     int missing,
+                                     int verbose)
+{
+    int m = F->m;
+    int q = F->q;
     long long astar = eval[missing];
 
-    /*
-     * (Optional) Ratio subsymbols as in the GW description:
-     *   ratio_j = f(alpha_j) / (alpha_j - alpha*)
-     *   s_j[t]  = Tr(t * ratio_j)  for t = 1..q-1
-     * Retained for exposition; not used in reconstruction below.
-     */
-    
-
-    /*
-     * Reconstruction via the sum-zero identity:
-     *   tr[i]  =  -sum_{j != missing}  Tr(dual[i] * f(alpha_j))
-     *   f(a*)  =   sum_i  tr[i] * basis[i]
-     */
-    int *tr = calloc(m, sizeof(int));
-    for (int i = 0; i < m; i++) {
+    assert(missing >= 0 && missing < n);
 
     if (verbose) {
-        printf("Tr(u%d f(alpha*)) = - [ ", i);
+        printf("\n=== GW Repair with Subsymbol Download ===\n");
+        printf("Erased node: α* = %lld\n", astar);
+        printf("Erased symbol: f(α*) unknown\n\n");
     }
 
-    int sum = 0;
+    /* Step 1: Download subsymbols */
+    int *subsymbol = malloc(n * sizeof(int));
+
+    if (verbose) {
+        printf("=== Step 1: Download Subsymbols ===\n");
+        printf("s(α_j) = Tr(f(α_j) / (α_j - α*)) for j ≠ j*\n\n");
+    }
 
     for (int j = 0; j < n; j++) {
-        if (j == missing) continue;
+        if (j == missing) {
+            subsymbol[j] = 0;
+            if (verbose) {
+                printf("  s(α_%d): erased\n", j);
+            }
+        } else {
+            long long alpha_j = eval[j];
+            long long f_alpha_j = code[j];
+            long long diff = fsub(F, alpha_j, astar);
+            long long inv_diff = finv(F, diff);
+            long long ratio = fmul(F, f_alpha_j, inv_diff);
+            int s = ftrace(F, ratio);
+            subsymbol[j] = s;
+            
+            if (verbose) {
+                printf("  s(α_%d):\n", j);
+                printf("    α_%d = %lld, f(α_%d) = ", j, alpha_j, j);
+                print_vec(F, f_alpha_j);
+                printf("\n");
+                printf("    α_%d - α* = %lld - %lld = ", j, alpha_j, astar);
+                print_vec(F, diff);
+                printf("\n");
+                printf("    (α_%d - α*)^(-1) = ", j);
+                print_vec(F, inv_diff);
+                printf("\n");
+                printf("    f(α_%d) / (α_%d - α*) = ", j, j);
+                print_vec(F, ratio);
+                printf("\n");
+                printf("    s(α_%d) = Tr(", j);
+                print_vec(F, ratio);
+                printf(") = %d\n", s);
+            }
+        }
+    }
 
-        int contrib = ftrace(F, fmul(F, dual[i], code[j]));
+    if (verbose) printf("\n");
+
+    /* Step 2: Compute trace coefficients */
+    int *coeff = calloc(m, sizeof(int));  /* These are the COEFFICIENTS of basis */
+
+    if (verbose) {
+        printf("=== Step 2: Compute Coefficients ===\n");
+        printf("c[i] = Tr(u_i · f(α*)) = ∑_{j ≠ j*} Tr((α_j - α*) · u_i) · s(α_j)\n\n");
+    }
+
+    for (int i = 0; i < m; i++) {
+        int sum = 0;
 
         if (verbose) {
-            printf("Tr(u%d * c%d)=%d ", i, j, contrib);
-            if (j != n - 1) printf("+ ");
+            printf("  c[%d]:\n", i);
+            printf("    c[%d] = Tr(u_%d · f(α*)) = ∑_{j ≠ j*} Tr((α_j - α*) · u_%d) · s(α_j)\n", i, i, i);
+            printf("    u_%d = ", i);
+            print_vec(F, dual[i]);
+            printf("\n");
+            printf("    Terms:\n");
         }
 
-        sum = (sum + contrib) % q;
+        for (int j = 0; j < n; j++) {
+            if (j == missing) continue;
+
+            long long diff = fsub(F, eval[j], astar);
+            long long term = fmul(F, diff, dual[i]);
+            int tr_term = ftrace(F, term);
+            int contrib = (int)((long long)tr_term * subsymbol[j] % q);
+
+            sum = (sum + contrib) % q;
+
+            if (verbose) {
+                printf("      j=%d: (α_%d - α*) = ", j, j);
+                print_vec(F, diff);
+                printf(", Tr((α_%d - α*) · u_%d) = Tr(", j, i);
+                print_vec(F, term);
+                printf(") = %d, s(α_%d) = %d, contrib = %d × %d = %d\n", 
+                       tr_term, j, subsymbol[j], tr_term, subsymbol[j], contrib);
+            }
+        }
+
+        /* Apply negation - part of the GW algorithm */
+        coeff[i] = ((-sum) % q + q) % q;
+
+        if (verbose) {
+            printf("    Sum of contributions = %d\n", sum);
+            printf("    c[%d] = -(sum) = -%d = %d\n\n", i, sum, coeff[i]);
+        }
     }
 
-    tr[i] = ((-sum) % q + q) % q;
+    if (verbose) printf("\n");
 
-    if (verbose) {
-        printf("] = %d\n", tr[i]);
-    }
-}
-    if (verbose) {
-    printf("Trace values Tr(u_i f(alpha*)):\n");
-    for (int i = 0; i < m; i++) {
-        printf("Tr(u%d f(alpha*)) = %d\n", i, tr[i]);
-    }
-    printf("\n");
-}
-
+    /* Step 3: Reconstruct f(α*) = ∑_i c[i] · b_i */
     long long recon = 0;
-for (int i = 0; i < m; i++)
-    recon = fadd(F, recon, fscalar(F, tr[i], basis[i]));
 
-if (verbose) {
-    printf("Reconstruction:\n");
-    printf("f(alpha*) = ");
-
-    for (int i = 0; i < m; i++) {
-        printf("%d × ", tr[i]);
-        print_poly(F, basis[i]);
-
-        if (i < m - 1) printf(" + ");
+    if (verbose) {
+        printf("=== Step 3: Reconstruction ===\n");
+        printf("f(α*) = ∑_i c[i] · b_i\n");
+        printf("where c[i] are coefficients from Step 2\n\n");
+        printf("f(α*) = ");
     }
 
+    for (int i = 0; i < m; i++) {
+        long long term = fscalar(F, coeff[i], basis[i]);
+        recon = fadd(F, recon, term);
 
-    printf("\n\n");
-}
+        if (verbose) {
+            printf("%d·b_%d", coeff[i], i);
+            if (i < m - 1) printf(" + ");
+        }
+    }
 
-    
-    free(tr);
+    if (verbose) {
+        printf("\n     = ");
+        print_vec(F, recon);
+        printf("\n\n");
+    }
+
+    free(subsymbol);
+    free(coeff);
     return recon;
 }
 
@@ -512,28 +601,32 @@ if (verbose) {
 
 int main(int argc, char *argv[])
 {
-    /* Seed RNG */
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     srand((unsigned)(ts.tv_nsec ^ ts.tv_sec));
 
-    /* Parse or prompt for q and m */
     int q_val = 2, m_val = 3;
     if (argc >= 3) {
         q_val = atoi(argv[1]);
         m_val = atoi(argv[2]);
     } else {
-        printf("GW RS Repair over GF(q^m)\n");
-        printf("Enter q (prime, use q=2 for the single-subsymbol GW formula): ");
+        printf("GW RS Repair over GF(q^m) with Subsymbol Download\n");
+        printf("Enter q (prime): ");
         fflush(stdout); scanf("%d", &q_val);
-        printf("Enter m (>= 2):  ");
+        printf("Enter m (>= 2): ");
         fflush(stdout); scanf("%d", &m_val);
     }
 
-    if (!is_prime(q_val)) { fprintf(stderr, "q=%d not prime.\n",    q_val); return 1; }
-    if (m_val < 2)         { fprintf(stderr, "m must be >= 2.\n");           return 1; }
+    if (!is_prime(q_val)) { 
+        fprintf(stderr, "q=%d not prime.\n", q_val); 
+        return 1; 
+    }
+    if (m_val < 2) { 
+        fprintf(stderr, "m must be >= 2.\n"); 
+        return 1; 
+    }
 
-    /* Initialise field */
+    /* Initialize field */
     Field F;
     F.q    = q_val;
     F.m    = m_val;
@@ -545,24 +638,19 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Build polynomial and dual bases */
+    /* Build bases */
     long long *basis = malloc(m_val * sizeof(long long));
     long long *dual  = malloc(m_val * sizeof(long long));
     make_basis(&F, basis);
     make_dual(&F, basis, dual);
 
-    /*
-     * GW construction parameters:
-     *   n = q^m          (evaluate on all of GF(q^m))
-     *   k in [1, q^m - q^(m-1)]   chosen uniformly at random
-     *       = [1, n * (1 - 1/q)]
-     */
+    /* Setup RS parameters */
     int n_rs  = (int)F.size;
-    int k_max = (int)(F.size - ipow((long long)q_val, m_val - 1)); /* q^m - q^(m-1) */
-    int k     = 1 + rand() % k_max;   /* uniform in [1, k_max] */
+    int k_max = (int)(F.size - ipow((long long)q_val, m_val - 1));
+    int k     = 1 + rand() % k_max;
 
     long long *eval = malloc(n_rs * sizeof(long long));
-    long long *msg  = malloc(k_max * sizeof(long long)); /* allocate max to allow reuse */
+    long long *msg  = malloc(k_max * sizeof(long long));
     long long *code = malloc(n_rs * sizeof(long long));
 
     for (int i = 0; i < n_rs; i++) eval[i] = i;
@@ -570,85 +658,97 @@ int main(int argc, char *argv[])
 
     rs_encode(&F, msg, k, eval, n_rs, code);
 
-    int       missing  = rand() % n_rs;
+    /* Single repair example */
+    int missing = rand() % n_rs;
     long long true_val = code[missing];
-    int *subsymbol = calloc(n_rs, sizeof(int));
-long long astar = eval[missing];
 
-for (int j = 0; j < n_rs; j++) {
-    if (j == missing) continue;
-
-    long long diff  = fsub(&F, eval[j], astar);
-    long long ratio = fmul(&F, code[j], finv(&F, diff));
-
-    subsymbol[j] = ftrace(&F, ratio);   // s(alpha_j)
-}
-
-    /* Print field info */
-    printf("\nGF(%d^%d)   n=%d (full field)   k=%d  (random in [1, %d])\n", q_val, m_val, n_rs, k, k_max);
-    printf("Irreducible polynomial: p(x) = x^%d", m_val);
+    printf("\n========================================\n");
+    printf("GF(%d^%d)   n=%d (full field)   k=%d\n", q_val, m_val, n_rs, k);
+    printf("Irreducible: p(x) = x^%d", m_val);
     for (int i = m_val - 1; i >= 0; i--)
-        if (F.irr[i]) printf(" + %d*x^%d", F.irr[i], i);
-    printf("\n");
+        if (F.irr[i]) printf(" + %d·x^%d", F.irr[i], i);
+    printf("\n========================================\n\n");
 
-    printf("Polynomial basis b[i] = X^i:   ");
+    printf("Message polynomial coefficients:\n");
+    printf("f(x) = m_0 + m_1·x + m_2·x^2 + ... + m_{k-1}·x^{k-1}\n");
+    printf("where k = %d\n\n", k);
+
+    printf("Polynomial basis b[i] = x^i:\n");
     for (int i = 0; i < m_val; i++) {
-        printf("b[%d]=", i); print_vec(&F, basis[i]); printf("  ");
-    }
-    printf("\nDual basis u[i]:               ");
-    for (int i = 0; i < m_val; i++) {
-        printf("u[%d]=", i); print_vec(&F, dual[i]); printf("  ");
-    }
-    printf("\n\n");
-
-    /* Print codeword */
-    printf("Full codeword  (c%d is the erased symbol):\n", missing);
-
-for (int i = 0; i < n_rs; i++) {
-    if (i == missing) {
-        printf("  c%d = [ERASED]\n", i);
-    } else {
-        printf("  c%d = ", i);
-        print_vec(&F, code[i]);
-
-        printf("   s(alpha_%d) = %d", i, subsymbol[i]);
-
+        printf("  b_%d: ", i);
+        print_vec(&F, basis[i]);
         printf("\n");
     }
-}
+    printf("\n");
 
-    /* Repair */
-    printf("\n--- Repair of c%d   (alpha* = %lld) ---\n\n", missing, eval[missing]);
-    long long recon = repair_gw(&F, basis, dual, eval, n_rs, code, missing, 1);
+    printf("Dual basis u[i]:\n");
+    for (int i = 0; i < m_val; i++) {
+        printf("  u_%d: ", i);
+        print_vec(&F, dual[i]);
+        printf("\n");
+    }
+    printf("\n");
 
-    printf("\n  c%d (erased)  = ", missing); print_vec(&F, true_val);
-    printf("\n  Recovered     = ");           print_vec(&F, recon);
-    printf("\n  Result        : %s\n", (recon == true_val) ? "CORRECT" : "WRONG");
+    printf("Evaluation points: α_i = i for i = 0..%d\n\n", n_rs - 1);
 
-    /* Batch trials */
-    printf("\nRunning 50 random repair trials...\n");
+    printf("Codeword symbols f(α_i):\n");
+    for (int i = 0; i < n_rs; i++) {
+        printf("  c_%d = f(α_%d) = f(%d) = ", i, i, i);
+        if (i == missing) {
+            printf("erased");
+        } else {
+            print_vec(&F, code[i]);
+        }
+        printf("\n");
+    }
+
+    printf("\n--- GW Repair: Reconstruct f(α*) where α* = %d ---", missing);
+
+    /* Perform repair with verbose output */
+    long long recon = repair_gw_subsymbol(&F, basis, dual, eval, n_rs, code, missing, 1);
+
+    printf("=== Verification ===\n");
+    printf("True value:    f(α_%d) = ", missing);
+    print_vec(&F, true_val);
+    printf("\n");
+    printf("Recovered:     f(α_%d) = ", missing);
+    print_vec(&F, recon);
+    printf("\n");
+    printf("Status:        %s\n", (recon == true_val) ? "✓ CORRECT" : "✗ WRONG");
+
+    printf("\nRepair bandwidth: (n-1)·log_2(q) = %d·log_2(%d) = %d bits\n",
+           n_rs - 1, q_val, n_rs - 1);
+
+    printf("\n");
+
+    /* Batch test */
+    printf("Running 50 random repair trials...\n");
     int pass = 0, fail = 0;
+
     for (int trial = 0; trial < 50; trial++) {
-        int k_trial = 1 + rand() % k_max;   /* fresh random k each trial */
+        int k_trial = 1 + rand() % k_max;
         for (int i = 0; i < k_trial; i++)
             msg[i] = (long long)(rand() % F.size);
         rs_encode(&F, msg, k_trial, eval, n_rs, code);
 
-        int       mi = rand() % n_rs;
-        long long r  = repair_gw(&F, basis, dual, eval, n_rs, code, mi, 0);
+        int mi = rand() % n_rs;
+        long long expected = code[mi];
 
-        if (r == code[mi]) {
+        long long result = repair_gw_subsymbol(&F, basis, dual, eval, n_rs, code, mi, 0);
+
+        if (result == expected) {
             pass++;
         } else {
             fail++;
-            printf("  FAIL trial %d (k=%d): c%d expected=", trial, k_trial, mi);
-            print_vec(&F, code[mi]);
-            printf(" got=");
-            print_vec(&F, r);
+            printf("  FAIL trial %d: c_%d expected ", trial, mi);
+            print_vec(&F, expected);
+            printf(", got ");
+            print_vec(&F, result);
             printf("\n");
         }
     }
-    printf("50 trials: %d pass, %d fail\n", pass, fail);
+
+    printf("\nResults: %d passed, %d failed\n", pass, fail);
 
     /* Cleanup */
     free(eval); free(msg); free(code);
