@@ -223,5 +223,3 @@ Dual basis reconstructs them exactly.
 
 ---
 
-👉 I can turn this into **resume bullet points + interview explanation (30 sec version)**
-
