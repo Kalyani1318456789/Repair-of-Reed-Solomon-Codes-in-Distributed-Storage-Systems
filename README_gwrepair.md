@@ -12,7 +12,7 @@ The goal is to **recover a lost codeword symbol** in a distributed storage syste
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 * Runtime construction of finite field ( GF(q^m) )
 * Automatic search for irreducible polynomial (no lookup tables)
@@ -23,7 +23,7 @@ The goal is to **recover a lost codeword symbol** in a distributed storage syste
 
 ---
 
-## 📌 Key Parameters
+##  Key Parameters
 
 | Symbol      | Meaning                    |
 | ----------- | -------------------------- |
@@ -35,7 +35,7 @@ The goal is to **recover a lost codeword symbol** in a distributed storage syste
 
 ---
 
-## 🧠 Mathematical Background
+## Mathematical Background
 
 ### Finite Field ( GF(q^m) )
 
@@ -59,7 +59,7 @@ codeword = (f(\alpha_0), f(\alpha_1), ..., f(\alpha_{n-1}))
 
 ---
 
-### 🔥 Sum-Zero Identity
+###  Sum-Zero Identity
 
 When:
 [
@@ -134,7 +134,7 @@ f(\alpha^*) = \sum_i tr[i] \cdot b_i
 
 ---
 
-## 🧩 Code Structure
+##  Code Structure
 
 ```
 Field + Utilities
@@ -164,7 +164,7 @@ gcc -o gw gwrepair.c -lm
 
 ---
 
-## ▶️ Running
+##  Running
 
 ```bash
 ./gw 2 3
@@ -195,7 +195,7 @@ Result: CORRECT
 
 ---
 
-## ⚠️ Limitations
+## Limitations
 
 * ( q ) must be **prime**
 * ( m ≥ 2 )
@@ -206,7 +206,7 @@ Result: CORRECT
 
 ---
 
-## 💡 Important Insight
+## Important Insight
 
 ```text
 Trace breaks field elements into small pieces.
@@ -215,7 +215,7 @@ Dual basis reconstructs them exactly.
 
 ---
 
-## 📚 References
+##  References
 
 * Guruswami & Wootters (2017), *Repairing Reed-Solomon Codes*
 * Lidl & Niederreiter, *Finite Fields*
