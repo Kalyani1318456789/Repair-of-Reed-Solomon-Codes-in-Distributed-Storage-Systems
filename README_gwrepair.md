@@ -223,15 +223,5 @@ Dual basis reconstructs them exactly.
 
 ---
 
-## 🧠 One-Line Summary
-
-> Recover a missing RS symbol by decomposing field elements into trace components and reconstructing using a dual basis.
-
----
-
----
-
-If you want next level:
-
 👉 I can turn this into **resume bullet points + interview explanation (30 sec version)**
 
