@@ -1,5 +1,3 @@
-Here’s a **clean, professional README.md** you can directly paste into GitHub. It includes the fixes we discussed and is **prof-level polished** 👇
-
 ---
 
 # Guruswami–Wootters Reed-Solomon Repair (C Implementation)
