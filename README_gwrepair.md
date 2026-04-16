@@ -172,27 +172,6 @@ gcc -o gw gwrepair.c -lm
 
 ---
 
-## 📊 Sample Output
-
-```
-GF(2^3) n=8 k=3
-Irreducible polynomial: x^3 + x + 1
-
-Dual basis:
-u0 = 1
-u1 = x²
-u2 = x
-
-Repair result:
-Original = [1,0,1]
-Recovered = [1,0,1]
-Result: CORRECT
-
-50 trials: 50 pass, 0 fail
-```
-
----
-
 ## Limitations
 
 * ( q ) must be **prime**
